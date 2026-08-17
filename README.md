@@ -13,7 +13,7 @@
     <a href="https://jinhan261.github.io/hj-library/"><strong>在线阅读 →</strong></a>
   </p>
 
-  <sub>14 篇文章 · 5 个分类 · 约 185 万字 · 更新于 2026 年 7 月</sub>
+  <sub>16 篇文章 · 5 个分类 · 约 198 万字 · 更新于 2026 年 8 月</sub>
 </div>
 
 ---
@@ -56,7 +56,7 @@
       <td align="right">约&nbsp;1.2&nbsp;万字</td>
     </tr>
     <tr>
-      <td colspan="3"><a id="humanities"></a><strong>🏛️ 人文 · 2 篇</strong></td>
+      <td colspan="3"><a id="humanities"></a><strong>🏛️ 人文 · 4 篇</strong></td>
     </tr>
     <tr>
       <td><strong><a href="https://jinhan261.github.io/EnglishLinguisticsReport/">英语是怎么来的</a></strong></td>
@@ -67,6 +67,16 @@
       <td><strong><a href="https://jinhan261.github.io/WorldChinaHistoryReport/">文明的并行</a></strong></td>
       <td>把中国史放回世界坐标系，展开三千年同期对照。</td>
       <td align="right">约&nbsp;8.7&nbsp;万字</td>
+    </tr>
+    <tr>
+      <td><strong><a href="https://jinhan261.github.io/hj-library/EnglishForRoboticsSEAReport/">从能说，到能把工作推进</a></strong></td>
+      <td>为即将去新加坡和马来西亚做机器人开发与市场的你，重建听力、口语和跨文化协作。</td>
+      <td align="right">约&nbsp;3.4&nbsp;万字</td>
+    </tr>
+    <tr>
+      <td><strong><a href="https://jinhan261.github.io/hj-library/MalaysiaSingaporeHistoryReport/">海峡如何成为两个国家</a></strong></td>
+      <td>从海上世界、殖民重组和分家，读到两国制度、社会与长住生活地图。</td>
+      <td align="right">约&nbsp;9.5&nbsp;万字</td>
     </tr>
     <tr>
       <td colspan="3"><a id="technology"></a><strong>⚙️ 科技 · 4 篇</strong></td>
