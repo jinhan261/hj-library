@@ -1,0 +1,147 @@
+name: Deploy existing Pages artifact
+
+on:
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages-direct-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy existing artifact
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - name: Deploy through the GitHub Pages REST API
+        id: deploy
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ARTIFACT_ID: "9292278203"
+          EXPECTED_ARTIFACT_SHA: "4a971804ce99da513ce4e57f0b8b9a51ee030cfc"
+          EXPECTED_ARTIFACT_DIGEST: "sha256:dcdae0666fb72c8e136536f0e25887b9e0dd2f790c9ff85846357e6a8f961a3f"
+        run: |
+          set -euo pipefail
+
+          if [[ ! "${ARTIFACT_ID}" =~ ^[0-9]+$ ]]; then
+            echo "artifact_id must contain digits only" >&2
+            exit 2
+          fi
+          if [[ "${GITHUB_REF}" != "refs/heads/main" ]]; then
+            echo "This workflow may deploy only from refs/heads/main" >&2
+            exit 2
+          fi
+
+          artifact_file="${RUNNER_TEMP}/artifact.json"
+          curl --fail-with-body --silent --show-error \
+            --retry 6 --retry-all-errors --retry-delay 5 \
+            --connect-timeout 15 --max-time 60 \
+            --header "Accept: application/vnd.github+json" \
+            --header "Authorization: Bearer ${GH_TOKEN}" \
+            --header "X-GitHub-Api-Version: 2026-03-10" \
+            --output "${artifact_file}" \
+            "${GITHUB_API_URL}/repos/${GITHUB_REPOSITORY}/actions/artifacts/${ARTIFACT_ID}"
+          if [[ "$(jq -r '.name' "${artifact_file}")" != "github-pages" ]] || \
+             [[ "$(jq -r '.expired' "${artifact_file}")" != "false" ]] || \
+             [[ "$(jq -r '.workflow_run.repository_id' "${artifact_file}")" != "1307412172" ]] || \
+             [[ "$(jq -r '.workflow_run.head_branch' "${artifact_file}")" != "main" ]] || \
+             [[ "$(jq -r '.workflow_run.head_sha' "${artifact_file}")" != "${EXPECTED_ARTIFACT_SHA}" ]] || \
+             [[ "$(jq -r '.digest' "${artifact_file}")" != "${EXPECTED_ARTIFACT_DIGEST}" ]]; then
+            echo "Artifact must be an unexpired github-pages artifact built from main" >&2
+            exit 2
+          fi
+
+          oidc_file="${RUNNER_TEMP}/oidc.json"
+          curl --fail-with-body --silent --show-error \
+            --retry 6 --retry-all-errors --retry-delay 5 \
+            --connect-timeout 15 --max-time 60 \
+            --header "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
+            --output "${oidc_file}" \
+            "${ACTIONS_ID_TOKEN_REQUEST_URL}"
+          oidc_token="$(jq -er '.value' "${oidc_file}")"
+          echo "::add-mask::${oidc_token}"
+
+          payload="$(
+            jq -n \
+              --argjson artifact_id "${ARTIFACT_ID}" \
+              --arg pages_build_version "${GITHUB_SHA}" \
+              --arg oidc_token "${oidc_token}" \
+              '{artifact_id: $artifact_id, pages_build_version: $pages_build_version, oidc_token: $oidc_token, environment: "github-pages"}'
+          )"
+
+          if deployment_response="$({
+            curl --fail-with-body --silent --show-error \
+              --connect-timeout 15 --max-time 60 \
+              --request POST \
+              --header "Accept: application/vnd.github+json" \
+              --header "Authorization: Bearer ${GH_TOKEN}" \
+              --header "X-GitHub-Api-Version: 2026-03-10" \
+              --header "Content-Type: application/json" \
+              "${GITHUB_API_URL}/repos/${GITHUB_REPOSITORY}/pages/deployments" \
+              --data "${payload}"
+          })"; then
+            deployment_id="$(jq -er '.id // (.status_url | split("/")[-1])' <<<"${deployment_response}")"
+            page_url="$(jq -er '.page_url' <<<"${deployment_response}")"
+          else
+            echo "The create response was unavailable; checking the idempotent build version before failing."
+            recovery_file="${RUNNER_TEMP}/recovery.json"
+            curl --fail-with-body --silent --show-error \
+              --retry 3 --retry-all-errors --retry-delay 3 \
+              --connect-timeout 15 --max-time 45 \
+              --header "Accept: application/vnd.github+json" \
+              --header "Authorization: Bearer ${GH_TOKEN}" \
+              --header "X-GitHub-Api-Version: 2026-03-10" \
+              --output "${recovery_file}" \
+              "${GITHUB_API_URL}/repos/${GITHUB_REPOSITORY}/pages/deployments/${GITHUB_SHA}"
+            deployment_id="${GITHUB_SHA}"
+            page_url="$(jq -er '.page_url // "https://jinhan261.github.io/hj-library/"' "${recovery_file}")"
+          fi
+
+          if [[ "${page_url}" != http://* && "${page_url}" != https://* ]]; then
+            page_url="https://${page_url}"
+          fi
+          echo "page_url=${page_url}" >>"${GITHUB_OUTPUT}"
+          echo "Created Pages deployment ${deployment_id} from artifact ${ARTIFACT_ID}."
+
+          status_url="${GITHUB_API_URL}/repos/${GITHUB_REPOSITORY}/pages/deployments/${deployment_id}"
+          for attempt in $(seq 1 90); do
+            status_file="${RUNNER_TEMP}/status.json"
+            if ! curl --fail-with-body --silent --show-error \
+              --retry 2 --retry-all-errors --retry-delay 2 \
+              --connect-timeout 10 --max-time 20 \
+              --header "Accept: application/vnd.github+json" \
+              --header "Authorization: Bearer ${GH_TOKEN}" \
+              --header "X-GitHub-Api-Version: 2026-03-10" \
+              --output "${status_file}" \
+              "${status_url}"; then
+              echo "Status request ${attempt} failed; retrying."
+              sleep 5
+              continue
+            fi
+
+            status="$(jq -r '.status // "unknown_status"' "${status_file}")"
+            echo "Pages deployment status: ${status}"
+            case "${status}" in
+              succeed)
+                exit 0
+                ;;
+              deployment_failed|deployment_content_failed|deployment_cancelled|deployment_lost)
+                echo "Pages deployment ended with ${status}." >&2
+                exit 1
+                ;;
+            esac
+            sleep 5
+          done
+
+          echo "Timed out waiting for Pages deployment ${deployment_id}." >&2
+          exit 1
